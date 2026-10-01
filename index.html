@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Корпус отадъективных имён лиц</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header>
+  <div class="wrap row">
+    <h1><a href="index.html">Корпус отадъективных имён лиц</a></h1>
+    <nav>
+      <a href="index.html" class="active">Главная</a>
+      <a href="search.html">Поиск</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="hero">
+    <h1>Корпус отадъективных имён лиц</h1>
+    <p>Отприлагательные существительные со значением «лицо по психической характеристике». Поиск по прилагательному, деривату и суффиксу.</p>
+  </div>
+
+  <div id="kpis" class="kpis"><div class="loading">Загрузка…</div></div>
+
+  <h2 style="font-size:14px; text-transform:uppercase; color:var(--muted); margin:24px 0 10px">Разделы</h2>
+  <div class="tiles">
+    <a class="tile" href="search.html">
+      <div class="t">
+        <span class="ico">⌕</span>
+        Поиск по корпусу
+      </div>
+      <div class="d">Три поля: прилагательное, дериват, суффикс. Статус прилагательного, подсветка деривата в цитате, две группы дериватов по кластеру.</div>
+      <div class="n" id="tile-count">загрузка…</div>
+    </a>
+  </div>
+</div>
+
+<footer>Данные: Национальный корпус русского языка и Яндекс.Поиск</footer>
+
+<script>
+fetch('data.json')
+  .then(r => r.json())
+  .then(DATA => {
+    const total   = DATA.length;
+    const uniqAdj = new Set(DATA.map(r => r.adjective).filter(Boolean)).size;
+    const uniqDer = new Set(DATA.map(r => r.derivative).filter(Boolean)).size;
+    const uniqSuf = new Set(DATA.map(r => r.suffix).filter(Boolean)).size;
+    const years   = DATA.map(r => +r.year).filter(y => y > 0);
+    const yMin    = years.length ? Math.min(...years) : '—';
+    const yMax    = years.length ? Math.max(...years) : '—';
+
+    document.getElementById('kpis').innerHTML = `
+      <div class="kpi"><div class="v">${total.toLocaleString('ru-RU')}</div><div class="l">всего строк</div></div>
+      <div class="kpi"><div class="v">${uniqAdj.toLocaleString('ru-RU')}</div><div class="l">прилагательных</div></div>
+      <div class="kpi"><div class="v">${uniqDer.toLocaleString('ru-RU')}</div><div class="l">дериватов</div></div>
+      <div class="kpi"><div class="v">${uniqSuf.toLocaleString('ru-RU')}</div><div class="l">суффиксов</div></div>
+      <div class="kpi"><div class="v">${yMin}–${yMax}</div><div class="l">диапазон годов</div></div>
+    `;
+    document.getElementById('tile-count').textContent = total.toLocaleString('ru-RU') + ' строк →';
+  })
+  .catch(e => {
+    document.getElementById('kpis').innerHTML =
+      '<div class="panel">Ошибка загрузки data.json: ' + e.message + '</div>';
+  });
+</script>
+</body>
+</html>

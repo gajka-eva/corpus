@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Поиск · Корпус отадъективных имён лиц</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header>
+  <div class="wrap row">
+    <h1><a href="index.html">Корпус отадъективных имён лиц</a></h1>
+    <nav>
+      <a href="index.html">Главная</a>
+      <a href="search.html" class="active">Поиск</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap">
+  <form class="search" id="search-form" onsubmit="return false">
+    <div class="fields">
+      <div>
+        <label for="q_adj">Прилагательное</label>
+        <input type="text" id="q_adj" placeholder="например, ветреный" autocomplete="off" autofocus>
+      </div>
+      <div>
+        <label for="q_der">Дериват</label>
+        <input type="text" id="q_der" placeholder="например, ветреник" autocomplete="off">
+      </div>
+      <div>
+        <label for="q_suf">Суффикс</label>
+        <input type="text" id="q_suf" placeholder="например, ик" autocomplete="off">
+      </div>
+    </div>
+    <div class="actions">
+      <button type="button" id="go">Найти</button>
+      <a class="reset" href="search.html">Сброс</a>
+    </div>
+  </form>
+
+  <div id="adj-status"></div>
+
+  <div class="stats" id="stats"></div>
+
+  <div id="deriv-groups"></div>
+
+  <div id="results"></div>
+  <div id="loading" class="loading">Загрузка данных…</div>
+
+  <div class="pager" id="pager"></div>
+</div>
+
+<footer>Данные: Национальный корпус русского языка и Яндекс.Поиск</footer>
+
+<script>
+let DATA = [];
+let currentPage = 1;
+const PER_PAGE = 10;
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function hl(text, ...queries){
+  let safe = esc(text);
+  for (let q of queries){
+    q = (q||'').trim();
+    if (!q) continue;
+    const re = new RegExp('(' + q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + ')', 'gi');
+    safe = safe.replace(re, '<mark>$1</mark>');
+  }
+  return safe;
+}
+
+function highlightWords(r){
+  const w = [];
+  if (r.highlighted) w.push(r.highlighted);
+  if (r.derivative)  w.push(r.derivative);
+  return w;
+}
+
+function apply(){
+  const qa = $('q_adj').value.trim();
+  const qd = $('q_der').value.trim();
+  const qs = $('q_suf').value.trim().replace(/^-/,'');
+  const qaL = qa.toLowerCase();
+  const qdL = qd.toLowerCase();
+  const qsL = qs.toLowerCase();
+
+  const filtered = DATA.filter(r => {
+    if (qaL && !(r.adjective||'').toLowerCase().includes(qaL)) return false;
+    if (qdL && !(r.derivative||'').toLowerCase().includes(qdL)) return false;
+    if (qsL && (r.suffix||'').toLowerCase() !== qsL) return false;
+    return true;
+  });
+
+  // Статус прилагательного — только если заполнено поле "Прилагательное"
+  renderAdjStatus(qa, filtered);
+
+  // Счётчики
+  const total = filtered.length;
+  const pages = Math.max(1, Math.ceil(total / PER_PAGE));
+  if (currentPage > pages) currentPage = 1;
+  $('stats').innerHTML =
+    '<span>Найдено: <b>' + total.toLocaleString('ru-RU') + '</b></span>' +
+    '<span>Страница: <b>' + currentPage + '</b> из <b>' + pages + '</b></span>';
+
+  // Две группы дериватов
+  renderDerivGroups(filtered, qd);
+
+  // Карточки
+  const pageRows = filtered.slice((currentPage-1)*PER_PAGE, currentPage*PER_PAGE);
+  renderCards(pageRows, qa, qd, qs);
+
+  // Пагинация
+  renderPager(currentPage, pages);
+}
+
+function renderAdjStatus(qa, filtered){
+  const box = $('adj-status');
+  if (!qa) { box.innerHTML = ''; return; }
+
+  // Сначала ищем точное совпадение, если нет — берём из первой отфильтрованной строки
+  const exact = DATA.find(r => (r.adjective||'').toLowerCase() === qa.toLowerCase());
+  let statuses = [];
+  if (exact && exact.status_adjective) {
+    statuses = [exact.status_adjective];
+  } else if (filtered.length) {
+    const set = new Set(filtered.map(r => r.status_adjective).filter(Boolean));
+    statuses = [...set];
+  }
+  if (!statuses.length) { box.innerHTML = ''; return; }
+
+  box.innerHTML =
+    '<div class="adj-status">' +
+      '<span class="muted">Статус словообразовательной позиции «носитель признака» в парадигме:</span>' +
+      statuses.map(s => '<span class="status-badge">' + esc(s) + '</span>').join('') +
+    '</div>';
+}
+
+function renderDerivGroups(filtered, qd){
+  const rooted = {};
+  const other  = {};
+  for (const r of filtered){
+    const d = r.derivative;
+    if (!d) continue;
+    const isRooted = (r.cluster||'').toLowerCase() === 'укорененный';
+    const bucket = isRooted ? rooted : other;
+    bucket[d] = (bucket[d] || 0) + 1;
+  }
+  const toList = obj => Object.keys(obj).sort((a,b) => a.localeCompare(b, 'ru'));
+
+  const rootedList = toList(rooted);
+  const otherList  = toList(other);
+
+  if (!rootedList.length && !otherList.length){
+    $('deriv-groups').innerHTML = '';
+    return;
+  }
+
+  const groupHtml = (title, list) => {
+    if (!list.length) return '';
+    const shown = list.slice(0, 3);
+    const rest  = list.slice(3);
+    return `
+      <div class="deriv-group">
+        <div class="deriv-group-title">${title}</div>
+        <div class="deriv-list" data-group="${title}">
+          ${shown.map(d => `<span class="deriv-mini">${esc(d)}</span>`).join('')}
+          ${rest.map(d => `<span class="deriv-mini deriv-extra">${esc(d)}</span>`).join('')}
+          ${rest.length ? `<button type="button" class="deriv-toggle" data-total="${list.length}">Показать все (${list.length})</button>` : ''}
+        </div>
+      </div>
+    `;
+  };
+
+  $('deriv-groups').innerHTML =
+    groupHtml('Укорененные дериваты', rootedList) +
+    groupHtml('Неукорененные дериваты', otherList);
+}
+
+function renderCards(rows, qa, qd, qs){
+  if (!rows.length){
+    $('results').innerHTML = '<div class="empty">Ничего не найдено. Попробуйте изменить запрос или сбросить фильтры.</div>';
+    return;
+  }
+  $('results').innerHTML = '<div class="cards">' + rows.map(r => {
+    const words = [...highlightWords(r), qa, qd].filter(Boolean);
+    return `
+      <article class="card">
+        ${r.derivative ? `<div class="deriv-head">${esc(r.derivative)}</div>` : ''}
+        <div class="quote">${hl(r.text, ...words)}</div>
+        <div class="src">${esc(r.domain||'')}</div>
+        <div class="tags">
+          ${r.suffix ? `<span class="tag suf">-${esc(r.suffix)}</span>` : ''}
+          ${r.year   ? `<span class="tag">${esc(r.year)}</span>` : ''}
+          ${r.source ? `<span class="tag">${esc(r.source)}</span>` : ''}
+        </div>
+      </article>
+    `;
+  }).join('') + '</div>';
+}
+
+function renderPager(page, pages){
+  const p = $('pager');
+  if (pages <= 1){ p.innerHTML = ''; return; }
+  const btn = (label, target, disabled) =>
+    `<button ${disabled ? 'disabled' : ''} data-page="${target}">${label}</button>`;
+  p.innerHTML =
+    btn('« Первая', 1, page === 1) +
+    btn('‹ Назад', page - 1, page === 1) +
+    `<span class="cur">${page} / ${pages}</span>` +
+    btn('Вперёд ›', page + 1, page === pages) +
+    btn('Последняя »', pages, page === pages);
+
+  p.querySelectorAll('button[data-page]').forEach(b => {
+    b.addEventListener('click', () => {
+      currentPage = +b.dataset.page;
+      apply();
+      window.scrollTo({top: 0, behavior: 'smooth'});
+    });
+  });
+}
+
+// Раскрытие дериватов по клику
+document.addEventListener('click', function(e){
+  const btn = e.target.closest('.deriv-toggle');
+  if (!btn) return;
+  const list = btn.closest('.deriv-list');
+  if (!list) return;
+  const open = list.classList.toggle('open');
+  const total = btn.dataset.total;
+  btn.textContent = open ? 'Свернуть' : 'Показать все (' + total + ')';
+});
+
+// Реакция на ввод
+['q_adj','q_der','q_suf'].forEach(id => {
+  $(id).addEventListener('input', () => {
+    currentPage = 1;
+    clearTimeout(window.__t);
+    window.__t = setTimeout(apply, 200);
+  });
+  $(id).addEventListener('keydown', e => {
+    if (e.key === 'Enter'){ currentPage = 1; apply(); }
+  });
+});
+$('go').addEventListener('click', () => { currentPage = 1; apply(); });
+
+// Загрузка данных
+fetch('data.json')
+  .then(r => r.json())
+  .then(d => {
+    DATA = d;
+    $('loading').style.display = 'none';
+    apply();
+  })
+  .catch(e => {
+    $('loading').innerHTML = 'Ошибка загрузки data.json: ' + esc(e.message);
+  });
+</script>
+</body>
+</html>
