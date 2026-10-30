@@ -253,6 +253,11 @@ fetch('data.json')
   .then(r => r.json())
   .then(d => {
     DATA = d;
+    const params = new URLSearchParams(location.search);
+if (params.get('q_adj')) $('q_adj').value = params.get('q_adj');
+if (params.get('q_der')) $('q_der').value = params.get('q_der');
+if (params.get('q_suf')) $('q_suf').value = params.get('q_suf').replace(/^-/,'');
+apply();
     $('loading').style.display = 'none';
     apply();
   })
