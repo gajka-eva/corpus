@@ -172,3 +172,48 @@ footer{color:var(--muted); font-size:12.5px; text-align:center; padding:10px 0 4
 @media (max-width:700px){
   .fields{grid-template-columns:1fr}
 }
+
+/* ===== Диаграмма суффиксов на главной ===== */
+.section-title{
+  font-size:14px; letter-spacing:.2px; text-transform:uppercase;
+  color:var(--muted); font-weight:700; margin:24px 0 10px;
+}
+
+.chart-panel{padding:18px 20px}
+.chart-head{
+  display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;
+  margin-bottom:14px;
+}
+.chart{display:flex; flex-direction:column; gap:8px}
+
+.chart-row{
+  display:grid;
+  grid-template-columns: 90px 1fr auto;
+  gap:12px;
+  align-items:center;
+}
+.chart-label{min-width:0}
+
+.chart-bar-wrap{
+  position:relative; height:10px; background:var(--accent2);
+  border-radius:6px; overflow:hidden;
+}
+.chart-bar{
+  position:absolute; left:0; top:0; bottom:0;
+  background:linear-gradient(90deg, var(--accent), #1e7a34);
+  border-radius:6px;
+  transition:width .3s ease;
+}
+
+.chart-value{font-size:13px; white-space:nowrap}
+.chart-value b{color:var(--ink)}
+
+.chart-extra{display:none; margin-top:10px}
+.chart-extra.open{display:flex}
+
+.chart-rest{margin-top:14px}
+
+@media (max-width:600px){
+  .chart-row{grid-template-columns: 70px 1fr;}
+  .chart-value{grid-column: 1 / -1; padding-left:82px}
+}
