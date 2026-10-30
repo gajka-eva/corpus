@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Корпус отадъективных имён лиц</title>
 <link rel="stylesheet" href="assets/style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -25,6 +26,23 @@
   </div>
 
   <div id="kpis" class="kpis"><div class="loading">Загрузка…</div></div>
+
+  <h2 class="section-title">Суффиксы имён лиц</h2>
+<div class="panel chart-panel">
+  <div class="chart-head">
+    <div class="muted">Число образованных дериватов по суффиксам</div>
+    <div class="chart-switch" id="suffix-switch">
+      <button type="button" data-mode="bar" class="active">Столбцы</button>
+      <button type="button" data-mode="doughnut">Круг</button>
+    </div>
+  </div>
+  <div class="chart-canvas-wrap">
+    <canvas id="suffix-chart"></canvas>
+  </div>
+  <div class="muted" id="suffix-hint" style="margin-top:10px">
+    Наведите на элемент, чтобы увидеть детали. Клик по подписи слева — фильтр по суффиксу.
+  </div>
+</div>
 
   <h2 class="section-title">Суффиксы отадъективных имен лиц</h2>
 <div id="suffix-chart" class="panel chart-panel">
@@ -72,19 +90,15 @@ fetch('data.json')
   .catch(e => {
     document.getElementById('kpis').innerHTML =
       '<div class="panel">Ошибка загрузки data.json: ' + e.message + '</div>';
-    const box = document.getElementById('suffix-chart');
-    if (box) box.innerHTML = '<div class="panel">Ошибка загрузки data.json: ' + e.message + '</div>';
   });
 
-// ===== Диаграмма суффиксов =====
-function renderSuffixChart(DATA) {
-  const box = document.getElementById('suffix-chart');
-  if (!box) return;
+// ================= Диаграмма суффиксов =================
+let suffixChart = null;
+let suffixData  = null;   // [{suffix, derivs, rows, adjs}]
+let suffixMode  = 'bar';  // 'bar' | 'doughnut'
 
-  // Считаем по каждому суффиксу:
-  //   rows   — всего вхождений
-  //   derivs — уникальных дериватов
-  //   adjs   — уникальных прилагательных
+function renderSuffixChart(DATA) {
+  // Агрегируем
   const map = new Map();
   for (const r of DATA) {
     const s = (r.suffix || '').trim();
@@ -96,70 +110,124 @@ function renderSuffixChart(DATA) {
     if (r.adjective)  o.adjs.add(r.adjective);
   }
 
-  const items = [...map.entries()]
+  suffixData = [...map.entries()]
     .map(([suffix, o]) => ({
       suffix,
-      rows:   o.rows,
       derivs: o.derivs.size,
+      rows:   o.rows,
       adjs:   o.adjs.size,
     }))
     .sort((a, b) => b.derivs - a.derivs || b.rows - a.rows);
 
-  if (!items.length) {
-    box.innerHTML = '<div class="empty">Нет данных по суффиксам.</div>';
+  if (!suffixData.length) {
+    document.querySelector('.chart-canvas-wrap').innerHTML =
+      '<div class="empty">Нет данных по суффиксам.</div>';
     return;
   }
 
-  // Показываем топ-15, остальные — в свёрнутом списке
-  const TOP = 15;
-  const shown = items.slice(0, TOP);
-  const rest  = items.slice(TOP);
-  const maxDerivs = shown[0].derivs || 1;
+  drawSuffixChart(suffixMode);
 
-  const rowHtml = it => `
-    <div class="chart-row">
-      <div class="chart-label">
-        <span class="tag suf">-${it.suffix}</span>
-      </div>
-      <div class="chart-bar-wrap">
-        <div class="chart-bar" style="width:${(it.derivs / maxDerivs * 100).toFixed(1)}%"></div>
-      </div>
-      <div class="chart-value">
-        <b>${it.derivs}</b> <span class="muted">дериватов</span>
-        <span class="muted">· ${it.rows} вхожд. · ${it.adjs} прил.</span>
-      </div>
-    </div>
-  `;
-
-  box.innerHTML = `
-    <div class="chart-head">
-      <div class="muted">Топ-${TOP} суффиксов по числу образованных дериватов</div>
-      <div class="muted">Всего суффиксов: <b>${items.length}</b></div>
-    </div>
-    <div class="chart">${shown.map(rowHtml).join('')}</div>
-    ${rest.length ? `
-      <div class="chart-rest">
-        <button type="button" class="deriv-toggle" id="suffix-toggle"
-                data-total="${items.length}">
-          Показать все (${items.length})
-        </button>
-        <div class="chart chart-extra" id="suffix-extra">
-          ${rest.map(rowHtml).join('')}
-        </div>
-      </div>
-    ` : ''}
-  `;
-
-  const toggle = document.getElementById('suffix-toggle');
-  if (toggle) {
-    toggle.addEventListener('click', () => {
-      const extra = document.getElementById('suffix-extra');
-      const open = extra.classList.toggle('open');
-      toggle.textContent = open
-        ? 'Свернуть'
-        : 'Показать все (' + toggle.dataset.total + ')';
+  // Переключатель столбцы/круг
+  document.querySelectorAll('#suffix-switch button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      suffixMode = btn.dataset.mode;
+      document.querySelectorAll('#suffix-switch button')
+        .forEach(b => b.classList.toggle('active', b === btn));
+      drawSuffixChart(suffixMode);
     });
-  }
+  });
+}
+
+function drawSuffixChart(mode) {
+  const canvas = document.getElementById('suffix-chart');
+  if (!canvas) return;
+
+  // Показываем топ-20, чтобы диаграмма не была нечитаемой
+  const TOP = 20;
+  const items = suffixData.slice(0, TOP);
+  const labels = items.map(i => '-' + i.suffix);
+  const values = items.map(i => i.derivs);
+
+  const palette = [
+    '#2f9e44','#1e7a34','#69c77d','#a7dbb4','#4cb35f',
+    '#3c8f4e','#8bd29a','#b7e0c1','#2b8a3e','#52b56a',
+    '#79c98c','#9bd7aa','#5bbd74','#3fa257','#84cf95',
+    '#c3f0cf','#71c483','#2a7d3e','#57b26d','#a2d9b0',
+  ];
+
+  if (suffixChart) suffixChart.destroy();
+
+  const isBar = mode === 'bar';
+
+  suffixChart = new Chart(canvas, {
+    type: isBar ? 'bar' : 'doughnut',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Дериватов',
+        data: values,
+        backgroundColor: isBar
+          ? '#2f9e44'
+          : labels.map((_, i) => palette[i % palette.length]),
+        borderColor: isBar ? '#1e7a34' : '#fff',
+        borderWidth: isBar ? 1 : 2,
+        borderRadius: isBar ? 4 : 0,
+        hoverBackgroundColor: isBar ? '#1e7a34' : undefined,
+        hoverBorderColor: '#fff',
+        hoverBorderWidth: 2,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 500 },
+      indexAxis: isBar ? 'y' : 'x',   // горизонтальные столбцы
+      plugins: {
+        legend: { display: !isBar },
+        tooltip: {
+          backgroundColor: 'rgba(22,38,28,.95)',
+          titleFont:  { size: 14, weight: '700' },
+          bodyFont:   { size: 13 },
+          padding: 12,
+          callbacks: {
+            title: (ctx) => {
+              const i = ctx[0].dataIndex;
+              return '-' + items[i].suffix;
+            },
+            label: (ctx) => {
+              const it = items[ctx.dataIndex];
+              return [
+                'Дериватов: ' + it.derivs,
+                'Вхождений: ' + it.rows,
+                'Прилагательных: ' + it.adjs,
+              ];
+            },
+          },
+        },
+      },
+      scales: isBar ? {
+        x: {
+          beginAtZero: true,
+          title: { display: true, text: 'Число дериватов' },
+          ticks: { precision: 0 },
+          grid: { color: '#eaf3ed' },
+        },
+        y: {
+          grid: { display: false },
+          ticks: { font: { weight: '600' } },
+        },
+      } : {},
+      // Клик по столбцу/сегменту → переход к поиску по этому суффиксу
+      onClick: (evt, elements) => {
+        if (!elements.length) return;
+        const it = items[elements[0].index];
+        window.location.href = 'search.html?q_suf=' + encodeURIComponent(it.suffix);
+      },
+      onHover: (evt, elements) => {
+        evt.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+      },
+    },
+  });
 };
 </script>
 </body>
