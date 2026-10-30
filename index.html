@@ -26,6 +26,11 @@
 
   <div id="kpis" class="kpis"><div class="loading">Загрузка…</div></div>
 
+  <h2 class="section-title">Суффиксы отадъективных имен лиц</h2>
+<div id="suffix-chart" class="panel chart-panel">
+  <div class="loading">Загрузка…</div>
+</div>
+
   <h2 style="font-size:14px; text-transform:uppercase; color:var(--muted); margin:24px 0 10px">Разделы</h2>
   <div class="tiles">
     <a class="tile" href="search.html">
@@ -61,11 +66,101 @@ fetch('data.json')
       <div class="kpi"><div class="v">${yMin}–${yMax}</div><div class="l">диапазон годов</div></div>
     `;
     document.getElementById('tile-count').textContent = total.toLocaleString('ru-RU') + ' строк →';
+
+    renderSuffixChart(DATA);
   })
   .catch(e => {
     document.getElementById('kpis').innerHTML =
       '<div class="panel">Ошибка загрузки data.json: ' + e.message + '</div>';
+    const box = document.getElementById('suffix-chart');
+    if (box) box.innerHTML = '<div class="panel">Ошибка загрузки data.json: ' + e.message + '</div>';
   });
+
+// ===== Диаграмма суффиксов =====
+function renderSuffixChart(DATA) {
+  const box = document.getElementById('suffix-chart');
+  if (!box) return;
+
+  // Считаем по каждому суффиксу:
+  //   rows   — всего вхождений
+  //   derivs — уникальных дериватов
+  //   adjs   — уникальных прилагательных
+  const map = new Map();
+  for (const r of DATA) {
+    const s = (r.suffix || '').trim();
+    if (!s) continue;
+    if (!map.has(s)) map.set(s, { rows: 0, derivs: new Set(), adjs: new Set() });
+    const o = map.get(s);
+    o.rows++;
+    if (r.derivative) o.derivs.add(r.derivative);
+    if (r.adjective)  o.adjs.add(r.adjective);
+  }
+
+  const items = [...map.entries()]
+    .map(([suffix, o]) => ({
+      suffix,
+      rows:   o.rows,
+      derivs: o.derivs.size,
+      adjs:   o.adjs.size,
+    }))
+    .sort((a, b) => b.derivs - a.derivs || b.rows - a.rows);
+
+  if (!items.length) {
+    box.innerHTML = '<div class="empty">Нет данных по суффиксам.</div>';
+    return;
+  }
+
+  // Показываем топ-15, остальные — в свёрнутом списке
+  const TOP = 15;
+  const shown = items.slice(0, TOP);
+  const rest  = items.slice(TOP);
+  const maxDerivs = shown[0].derivs || 1;
+
+  const rowHtml = it => `
+    <div class="chart-row">
+      <div class="chart-label">
+        <span class="tag suf">-${it.suffix}</span>
+      </div>
+      <div class="chart-bar-wrap">
+        <div class="chart-bar" style="width:${(it.derivs / maxDerivs * 100).toFixed(1)}%"></div>
+      </div>
+      <div class="chart-value">
+        <b>${it.derivs}</b> <span class="muted">дериватов</span>
+        <span class="muted">· ${it.rows} вхожд. · ${it.adjs} прил.</span>
+      </div>
+    </div>
+  `;
+
+  box.innerHTML = `
+    <div class="chart-head">
+      <div class="muted">Топ-${TOP} суффиксов по числу образованных дериватов</div>
+      <div class="muted">Всего суффиксов: <b>${items.length}</b></div>
+    </div>
+    <div class="chart">${shown.map(rowHtml).join('')}</div>
+    ${rest.length ? `
+      <div class="chart-rest">
+        <button type="button" class="deriv-toggle" id="suffix-toggle"
+                data-total="${items.length}">
+          Показать все (${items.length})
+        </button>
+        <div class="chart chart-extra" id="suffix-extra">
+          ${rest.map(rowHtml).join('')}
+        </div>
+      </div>
+    ` : ''}
+  `;
+
+  const toggle = document.getElementById('suffix-toggle');
+  if (toggle) {
+    toggle.addEventListener('click', () => {
+      const extra = document.getElementById('suffix-extra');
+      const open = extra.classList.toggle('open');
+      toggle.textContent = open
+        ? 'Свернуть'
+        : 'Показать все (' + toggle.dataset.total + ')';
+    });
+  }
+};
 </script>
 </body>
 </html>
